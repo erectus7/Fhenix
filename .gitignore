@@ -1,0 +1,12 @@
+/node_modules
+
+pk.txt
+proxy.txt
+*.env
+
+config.json
+
+*.log
+
+.DS_Store
+Thumbs.db
