@@ -50,7 +50,7 @@ Create the following two files in the main project folder:
     0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
     ```
 
-* **`proxies.txt`** (Optional)
+* **`proxy.txt`** (Optional)
     If you want to use proxies, fill it with your HTTP proxies. The order of proxies must correspond to the order of private keys.
     ```
     http://user:pass@host:port
