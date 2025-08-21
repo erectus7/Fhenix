@@ -43,7 +43,7 @@ The bot's configuration is divided into two parts: file setup and in-script setu
 
 Create the following two files in the main project folder:
 
-* **`private_keys.txt`**
+* **`pk.txt`**
     Fill it with all your wallet private keys, with each key on a new line.
     ```
     0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
