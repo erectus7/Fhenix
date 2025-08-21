@@ -5,12 +5,14 @@ import fs from "fs";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import axios from "axios";
+import logUpdate from 'log-update';
 
 const SEPOLIA_RPC_URL = "https://ethereum-sepolia-rpc.publicnode.com/";
 const SEPOLIA_CHAIN_ID = 11155111;
 const EETH_ADDRESS = "0x87A3effB84CBE1E4caB6Ab430139eC41d156D55A";
 const CONFIG_FILE = "config.json";
 const isDebug = false;
+const maxRetries = 3; // <-- JUMLAH MAKSIMAL PERCOBAAN ULANG
 
 let accounts = [];
 let proxies = [];
@@ -90,41 +92,39 @@ async function delay(ms) {
     if (shouldStop) return;
 
     const totalSeconds = Math.floor(ms / 1000);
-    if (totalSeconds <= 0) {
+    if (totalSeconds < 5) {
         await new Promise(resolve => setTimeout(resolve, ms));
         return;
     }
     
     const progressBarLength = 30;
-    let lastMessageLength = 0;
 
-    for (let second = 0; second < totalSeconds; second++) {
+    for (let second = 0; second <= totalSeconds; second++) {
         if (shouldStop) {
-            process.stdout.write("\r" + " ".repeat(lastMessageLength) + "\r");
+            logUpdate.clear();
             break;
         }
 
-        const progress = Math.floor(((second + 1) / totalSeconds) * progressBarLength);
+        const progress = Math.floor((second / totalSeconds) * progressBarLength);
         const progressBar = "=".repeat(progress) + " ".repeat(progressBarLength - progress);
         
         const remainingTime = totalSeconds - second;
         const hours = Math.floor(remainingTime / 3600);
         const minutes = Math.floor((remainingTime % 3600) / 60);
-        const seconds = remainingTime % 60;
+        const secondsLeft = remainingTime % 60;
         
         let timeString = "";
         if (hours > 0) timeString += `${hours}h `;
         if (minutes > 0) timeString += `${minutes}m `;
-        timeString += `${seconds}s`;
+        timeString += `${secondsLeft}s`;
 
-        const message = chalk.blueBright(`⏳ Waiting for ${timeString}... [${progressBar}]`);
-        process.stdout.write("\r" + message);
-        lastMessageLength = message.length;
+        logUpdate(chalk.blueBright(`⏳ Waiting for ${timeString}... [${progressBar}]`));
 
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
     
-    process.stdout.write("\n");
+    logUpdate.clear();
+    logUpdate.done();
 }
 
 function loadConfiguration() {
@@ -235,25 +235,38 @@ async function awaitConfirmation(tx, actionName) {
     printLog(`${actionName} confirmed successfully! Hash: ${chalk.cyan(getShortHash(tx.hash))}`, "success");
 }
 
+// =================================================================
+// [UPGRADE] FUNGSI INI SEKARANG MENDUKUNG RETRY
+// =================================================================
 async function sendTransaction(wallet, txParams, actionName, proxyUrl) {
     const provider = getProvider(proxyUrl);
     wallet = wallet.connect(provider);
     
-    let tx;
-    try {
-        const nonce = await getNextNonce(provider, wallet.address);
-        tx = await wallet.sendTransaction({ ...txParams, nonce });
-        printLog(`${actionName} sent. Awaiting confirmation... Hash: ${chalk.cyan(getShortHash(tx.hash))}`, "wait");
-        await awaitConfirmation(tx, actionName);
-    } catch (error) {
-        printLog(`Failed to send ${actionName} transaction: ${error.message}`, "error");
-        if (error.message.includes("nonce")) {
-            printLog("Nonce error detected, resetting nonce for the next attempt.", "warning");
-            delete nonceTracker[`${SEPOLIA_CHAIN_ID}_${wallet.address}`];
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const nonce = await getNextNonce(provider, wallet.address);
+            const tx = await wallet.sendTransaction({ ...txParams, nonce });
+            printLog(`${actionName} sent. Awaiting confirmation... Hash: ${chalk.cyan(getShortHash(tx.hash))}`, "wait");
+            await awaitConfirmation(tx, actionName);
+            return; // Jika berhasil, keluar dari fungsi
+        } catch (error) {
+            printLog(`Attempt ${attempt}/${maxRetries} for ${actionName} failed: ${error.message}`, "error");
+            if (error.message.includes("nonce")) {
+                printLog("Nonce error detected, resetting nonce for the next attempt.", "warning");
+                delete nonceTracker[`${SEPOLIA_CHAIN_ID}_${wallet.address}`];
+            }
+
+            if (attempt === maxRetries) {
+                printLog(`All ${maxRetries} attempts for ${actionName} failed.`, "error");
+                throw error; // Lemparkan error setelah percobaan terakhir
+            }
+            
+            printLog(`Retrying in 10 seconds...`, "warning");
+            await delay(10 * 1000);
         }
-        throw error;
     }
 }
+
 
 async function performEncrypt(wallet, amount, proxyUrl) {
     const amountWei = ethers.parseEther(amount.toString());
@@ -349,8 +362,7 @@ async function processSingleAccount(accountIndex) {
             }
 
         } catch (error) {
-            printLog(`An error occurred during cycle ${i + 1}: ${error.message}`, "error");
-            printLog(`Continuing to the next cycle/account after a short delay...`, "warning");
+            printLog(`An error occurred during cycle ${i + 1}. Moving to next account/cycle.`, "error");
             await delay(10 * 1000);
         }
     }
